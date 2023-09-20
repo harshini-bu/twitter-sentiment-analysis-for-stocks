@@ -1,0 +1,112 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score,classification_report
+from scipy.stats import randint
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import confusion_matrix, accuracy_score
+from sklearn.model_selection import RandomizedSearchCV
+
+stock_prices_df=pd.read_csv("stock_prices.csv")
+stock_prices_df
+
+twitter_sentiment_df=pd.read_csv("twitter_sentiment.csv")
+twitter_sentiment_df
+
+twitter_sentiment_df=twitter_sentiment_df.dropna(axis=1)
+twitter_sentiment_df
+
+stock_prices_df=stock_prices_df.dropna(axis=1)
+stock_prices_df
+
+merged_df=stock_prices_df.merge(twitter_sentiment_df,on="Date")
+merged_df.dropna(axis=1)
+
+merged_df.to_csv("merged_stocks_and_twitter_sentiment.csv",index=False)
+
+merged_df=pd.read_csv("merged_stocks_and_twitter_sentiment.csv")
+df=merged_df[["Date","Adj Close","Volume","ts_polarity","twitter_volume"]]
+df.set_index("Date",inplace=True)
+
+pos_sentiment_thres=0.10294888600847897
+neg_sentiment_thres=-0.0013141180857257349
+
+sentiments=[]
+for score in df["ts_polarity"]:
+  if score>=pos_sentiment_thres:
+    sentiments.append("Positive")
+  elif score<=neg_sentiment_thres:
+    sentiments.append("Negative")
+  else:
+    sentiments.append("Neutral")
+df["Sentiment"]=sentiments
+
+df["Sentiment"].value_counts()
+
+
+df["Price Difference"]=df["Adj Close"].diff()
+df.dropna(inplace=True)
+import numpy as np
+RISE=1
+FALL=0
+df["Stock_trend"]=np.where(
+    df["Price Difference"]>0,RISE,FALL
+)
+df
+
+
+new_df=df[["Adj Close",
+           "Volume",
+           "twitter_volume",
+           "Sentiment",
+           "Stock_trend"]]
+new_df=pd.get_dummies(new_df,columns=["Sentiment"])
+new_df.dropna(axis=1)
+
+X=new_df.copy()
+X.drop("Stock_trend",axis=1,inplace=True)
+
+y=new_df["Stock_trend"].values.reshape(-1,1)
+
+split=int(0.8*len(X))
+X_train=X[:split] 
+X_test=X[split:] 
+y_train=y[:split] 
+y_test=y[split:]
+
+scale=StandardScaler()
+X_scaler=scale.fit(X_train)
+X_train_scaled=X_scaler.transform(X_train)
+X_test_scaled=X_scaler.transform(X_test)
+
+import seaborn as sns
+sns.pairplot(data=new_df, diag_kind='kde')
+model = RandomForestClassifier(n_estimators=20)
+model.fit(X_train_scaled, y_train)
+
+confusion_matrix(y_test, model.predict(X_test_scaled))
+print(f"Accuracy is {round(accuracy_score(y_test, model.predict(X_test_scaled))*100,2)}")
+
+param_dist={'max_depth':[3,5,10,None],
+              'n_estimators':[10,100,200,300,400,500,600],
+              'max_features':randint(1,10),
+               'criterion':['gini','entropy'],
+               'bootstrap':[True,False],
+               'min_samples_leaf':randint(1,25),
+              }
+
+classifier = RandomForestClassifier(n_jobs = -1)
+search_clfr = RandomizedSearchCV(classifier, param_distributions = param_dist, n_jobs=-1, n_iter = 100,cv= 9)
+search_clfr.fit(X_train_scaled, y_train)
+
+params = search_clfr.best_params_
+score = search_clfr.best_score_
+print(params)
+print(score)
+
+classifier.fit(X_train_scaled, y_train)
+
+confusion_matrix(y_test, classifier.predict(X_test_scaled))
+
+print(f"Accuracy is {round(accuracy_score(y_test, classifier.predict(X_test_scaled))*100,2)}%")
+
